@@ -1855,7 +1855,7 @@ private:
   };
 
   kj::StringTree makeReaderDef(kj::StringPtr fullName, kj::StringPtr unqualifiedParentType,
-                               const TemplateContext& templateContext, bool isUnion,
+                               const TemplateContext& templateContext, kj::StringTree&& unionVariantDecl,
                                kj::Array<kj::StringTree>&& methodDecls) {
     return kj::strTree(
         templateContext.allDecls(),
@@ -1877,7 +1877,10 @@ private:
         "#endif  // !CAPNP_LITE\n"
         "\n",
         makeAsGenericDef(AsGenericRole::READER, templateContext, unqualifiedParentType),
-        isUnion ? kj::strTree("  inline Which which() const;\n") : kj::strTree(),
+        unionVariantDecl.size() == 0 ? kj::strTree() : kj::strTree(
+          "  inline Which which() const;\n",
+          kj::mv(unionVariantDecl),
+          "  inline UnionVariant getUnionVariant() const;\n"),
         kj::mv(methodDecls),
         "private:\n"
         "  ::capnp::_::StructReader _reader;\n"
@@ -2055,10 +2058,47 @@ private:
 
     // Name of the ::Which type, when applicable.
     CppTypeName whichName;
+    CppTypeName variantName;
     if (structNode.getDiscriminantCount() != 0) {
       whichName = cppFullName(schema, nullptr);
       whichName.addMemberType("Which");
+      
+      variantName = cppFullName(schema, nullptr);
+      variantName.addMemberType("Reader::UnionVariant");
     }
+    auto unionVariantDecl = 
+          structNode.getDiscriminantCount() == 0 ? kj::strTree() : kj::strTree(
+              "  using UnionVariant = std::variant<\n",
+              kj::StringTree(
+                KJ_MAP(f, schema.getUnionFields()) {
+                  auto name = typeName(f.getType(), nullptr);
+                  // TODO: Best way to figure out if it is a primitive type?
+                  switch (f.getType().which()) {
+                    case schema::Type::TEXT:
+                    case schema::Type::DATA:
+                    case schema::Type::LIST:
+                    case schema::Type::STRUCT:
+                    case schema::Type::INTERFACE:
+                    case schema::Type::ANY_POINTER:
+                      name.addMemberType("Reader");
+                    default:
+                      break;
+                  }
+
+                  return kj::strTree(name);
+                  
+
+                  // Shouldn't be necessary for getUnionFields
+                  /*
+                  if (hasDiscriminantValue(f.getProto())) {
+                    return kj::strTree("    ", optionName);
+                  } else {
+                    return kj::strTree();
+                  }
+                  */
+                }, ",\n"),
+              "\n  >;\n"
+          );
 
     return StructText {
       kj::strTree(
@@ -2091,7 +2131,7 @@ private:
           "\n"),
 
       kj::strTree(
-          makeReaderDef(fullName, name, templateContext, structNode.getDiscriminantCount() != 0,
+          makeReaderDef(fullName, name, templateContext, kj::mv(unionVariantDecl),
                         KJ_MAP(f, fieldTexts) { return kj::mv(f.readerMethodDecls); }),
           makeBuilderDef(fullName, name, templateContext, structNode.getDiscriminantCount() != 0,
                          KJ_MAP(f, fieldTexts) { return kj::mv(f.builderMethodDecls); }),
@@ -2110,7 +2150,22 @@ private:
               "  return _builder.getDataField<Which>(\n"
               "      ::capnp::bounded<", discrimOffset, ">() * ::capnp::ELEMENTS);\n"
               "}\n"
-              "\n"),
+              "\n",
+              templateContext.allDecls(),
+              "inline ", variantName, " ", fullName, "::Reader::getUnionVariant() const {\n"
+              "  switch (which()) {\n",
+              KJ_MAP(f, schema.getUnionFields()) {
+                auto name = protoName(f.getProto());
+                auto whichName = toUpperCase(name);
+                auto titleCase = toTitleCase(name);
+                return kj::strTree(
+                "    case ", whichName, ":\n",
+                "      return ", variantName, "(std::in_place_index<", whichName, ">, \n",
+                "          get", titleCase, "());\n");
+              },
+              "  }\n"
+              "}\n"
+              ),
           KJ_MAP(f, fieldTexts) { return kj::mv(f.inlineMethodDefs); }),
 
       kj::mv(defineText)
@@ -2982,6 +3037,7 @@ private:
           "\n"
           "#include <capnp/generated-header-support.h>\n"
           "#include <kj/windows-sanity.h>\n",  // work-around macro conflict with VOID
+          "#include <variant>\n",
           hasInterfaces ? kj::strTree(
             "#if !CAPNP_LITE\n"
             "#include <capnp/capability.h>\n"
