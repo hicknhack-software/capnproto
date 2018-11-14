@@ -1918,7 +1918,16 @@ private:
         "#endif  // !CAPNP_LITE\n"
         "\n",
         makeAsGenericDef(AsGenericRole::BUILDER, templateContext, unqualifiedParentType),
-        isUnion ? kj::strTree("  inline Which which();\n") : kj::strTree(),
+        isUnion ? kj::strTree("  inline Which which();\n",
+                              "  template<Which w>\n",
+                              "  auto static constexpr getWhichType(std::integral_constant<Which, w>);\n",
+                              "  template<Which w>\n",
+                              "  auto getBuilderbyIndex(Which);\n"
+                              "  template<Which w>\n",
+                              "  inline void setByIndex(std::integral_constant<Which, w> x, decltype(getWhichType(x)));\n"
+                              "  template<Which w>\n",
+                              "  inline auto initByIndex(std::integral_constant<Which, w> x) -> decltype(getWhichType(x));\n"
+        ) : kj::strTree(),
         kj::mv(methodDecls),
         "private:\n"
         "  ::capnp::_::StructBuilder _builder;\n"
@@ -2164,7 +2173,66 @@ private:
                 "          get", titleCase, "());\n");
               },
               "  }\n"
-              "}\n"
+              "}\n",
+              templateContext.allDecls(), // This might break on a generic struct,
+              "template<", fullName, "::Which w>\n"
+              "inline auto constexpr ", fullName, "::Builder::getWhichType(std::integral_constant<", fullName, "::Which, w>) {\n",
+              "    if constexpr (false) {}\n",
+              KJ_MAP(f, schema.getUnionFields()) {
+                auto name = protoName(f.getProto());
+                auto whichName = toUpperCase(name);
+                auto titleCase = toTitleCase(name);
+
+                return kj::strTree(
+                "    else if constexpr (w == ", whichName, ") {\n"
+                //"      return decltype(std::declval<",fullName, "::Builder>().get", titleCase, "()){nullptr};\n",
+                "      return std::declval<",fullName, "::Builder>().get", titleCase, "();\n",
+                "    }\n"
+                );
+              },
+              "}\n",
+              "template<", fullName, "::Which w>\n"
+              "inline void ", fullName, "::Builder::setByIndex(std::integral_constant<", fullName, "::Which, w> x, decltype(getWhichType(x)) value) {\n",
+              "    if constexpr (false) {}\n",
+              KJ_MAP(f, schema.getUnionFields()) {
+                auto name = protoName(f.getProto());
+                auto whichName = toUpperCase(name);
+                auto titleCase = toTitleCase(name);
+
+                return kj::strTree(
+                "    else if constexpr (w == ", whichName, ") {\n"
+                "      set", titleCase, "(value);\n",
+                "    }\n"
+                );
+              },
+              "}\n",
+              "template<", fullName, "::Which w>\n"
+              "inline auto ", fullName, "::Builder::initByIndex(std::integral_constant<", fullName, "::Which, w> x) -> decltype(getWhichType(x)) {\n",
+              "    if constexpr (false) {}\n",
+              KJ_MAP(f, schema.getUnionFields()) {
+                auto name = protoName(f.getProto());
+                auto whichName = toUpperCase(name);
+                auto titleCase = toTitleCase(name);
+
+                switch (f.getType().which()) {
+                    case schema::Type::TEXT:
+                    case schema::Type::DATA:
+                    //case schema::Type::LIST: // Lists need a separate size parameter
+                    case schema::Type::STRUCT:
+                    case schema::Type::INTERFACE:
+                    case schema::Type::ANY_POINTER:
+                        return kj::strTree(
+                        "    else if constexpr (w == ", whichName, ") {\n"
+                        "      return init", titleCase, "();\n",
+                        "    }\n"
+                        );
+                    default:
+                        return kj::strTree(); // Skip the non-composite types
+                }
+              },
+              "return {}\n;"
+              "}\n",
+              "\n"
               ),
           KJ_MAP(f, fieldTexts) { return kj::mv(f.inlineMethodDefs); }),
 
