@@ -2169,10 +2169,11 @@ private:
                 auto titleCase = toTitleCase(name);
                 return kj::strTree(
                 "    case ", whichName, ":\n",
-                "      return ", variantName, "(std::in_place_index<", whichName, ">, \n",
+                "      return", variantName, "(std::in_place_index<", whichName, ">, \n",
                 "          get", titleCase, "());\n");
               },
-              "  }\n"
+              "  }\n",
+             "  return", variantName, "{}\n;",
               "}\n",
               templateContext.allDecls(), // This might break on a generic struct,
               "template<", fullName, "::Which w>\n"
