@@ -1703,7 +1703,7 @@ void NodeTranslator::compileEnum(Void decl,
                                  List<Declaration>::Reader members,
                                  schema::Node::Builder builder) {
   // maps ordinal -> (code order, declaration)
-  std::multimap<uint, std::pair<uint, Declaration::Reader>> enumerants;
+  std::multimap<uint64_t, std::pair<uint, Declaration::Reader>> enumerants;
 
   uint codeOrder = 0;
   for (auto member: members) {
@@ -2345,7 +2345,7 @@ void NodeTranslator::compileInterface(Declaration::Interface::Reader decl,
   }
 
   // maps ordinal -> (code order, declaration)
-  std::multimap<uint, std::pair<uint, Declaration::Reader>> methods;
+  std::multimap<uint64_t, std::pair<uint, Declaration::Reader>> methods;
 
   uint codeOrder = 0;
   for (auto member: members) {
